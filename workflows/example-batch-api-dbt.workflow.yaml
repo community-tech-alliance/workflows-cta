@@ -1,0 +1,156 @@
+# Copyright 2022 Community Tech Alliance 
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Note that this uses the Batch API (which uses dedicated VM resources), but running this using Cloud Run for job execution is
+# essentially the same: https://cloud.google.com/workflows/docs/tutorials/execute-cloud-run-jobs
+
+main:
+  params: [args]
+  steps:
+    - init:
+        assign:
+          - repositoryAndImageName: "dbt-labs/dbt-bigquery:latest"
+    - runDbtInit:
+        call: createAndRunContainerJobs
+        args:
+          repositoryAndImageName: "dbt-labs/dbt-bigquery:latest"
+          script: dbt init
+    - runDbtInit:
+        call: createAndRunContainerJobs
+        args:
+          repositoryAndImageName: "dbt-labs/dbt-bigquery:latest"
+          script: dbt run --ful-refresh
+
+################################################################################################################
+##############################################  Sub Workflows  #################################################
+################################################################################################################
+
+# [START workflows_batch_container]
+createAndRunContainerJobs:
+  params: [repositoryAndImageName, script]
+  steps:
+    - init:
+        assign:
+          - projectId: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - region: "us-central1"
+          - batchApi: "batch.googleapis.com/v1"
+          - batchApiUrl: ${"https://" + batchApi + "/projects/" + projectId + "/locations/" + region + "/jobs"}
+          - repositoryAndImageName: ${repositoryAndImageName}
+          - imageUri: ${"/ghcr.io" + repositoryAndImageName}
+          - jobId: ${"job-dbt-run-" + string(int(sys.now()))}
+          - networkPath: global/networks/local-network-name
+          - subnetworkPath: regions/us-central1/subnetworks/local-subnetwork-name
+          - vmLabels:
+              imageName: ${repositoryAndImageName}
+              source: "workflows"
+    - createBucket:
+        call: googleapis.storage.v1.buckets.insert
+        args:
+          query:
+            project: ${projectId}
+          body:
+            name: ${bucket}
+    - logCreateBucket:
+        call: sys.log
+        args:
+          data: ${"Created bucket " + bucket}
+    - createAndRunBatchJob:
+        call: http.post
+        args:
+          url: ${batchApiUrl}
+          query:
+            job_id: ${jobId}
+          headers:
+            Content-Type: application/json
+          auth:
+            type: OAuth2
+          body:
+            taskGroups:
+              taskSpec:
+                runnables:
+                  - container:
+                      imageUri: ${imageUri}
+                      commands: ${script}
+                      volumes:
+                        - "/opt/files"
+                    # Shared environment for entire task group
+                    environment:
+                      variables:
+                        JOB_ID: ${jobId}
+                # Mount GCS bucket as file system for dbt files
+                # Assumes you deploy your files to GCS from your CI/CD
+                volumes:
+                  - gcs:
+                      remote: ${bucket}
+                    mountPath: "/opt/files"
+                  - dbt:
+                      remote: "/root/.dbt"
+                    mountPath: "/opt/files"
+              # Run 6 tasks on 1 VMs
+              taskCount: 1
+              parallelism: 1
+              taskCountPerNode: 1
+            logsPolicy:
+              destination: CLOUD_LOGGING
+            allocationPolicy:
+              serviceAccount:
+                email: ${"batch-compute@" + projectId + ".iam.gserviceaccount.com"}
+              network:
+                networkInterfaces:
+                  - network: ${networkPath}
+                    subnetwork: ${subnetworkPath}
+                    noExternalIpAddress: false
+        result: createAndRunBatchJobResponse
+    - getJob:
+        call: http.get
+        args:
+          url: ${batchApiUrl + "/" + jobId}
+          auth:
+            type: OAuth2
+        result: getJobResult
+    - logState:
+        call: sys.log
+        args:
+          data: ${"Current job state " + getJobResult.body.status.state}
+    - checkState:
+        switch:
+          - condition: ${getJobResult.body.status.state == "SUCCEEDED"}
+            next: returnResult
+          - condition: ${getJobResult.body.status.state == "FAILED"}
+            next: failExecution
+        next: sleep
+    - sleep:
+        call: sys.sleep
+        args:
+          seconds: 10
+        next: getJob
+    # You can delete the batch job or keep it for debugging
+    - logDeleteBatchJob:
+        call: sys.log
+        args:
+          data: ${"Deleting the batch job " + jobId}
+    - deleteBatchJob:
+        call: http.delete
+        args:
+          url: ${batchApiUrl + "/" + jobId}
+          auth:
+            type: OAuth2
+        result: deleteBatchJob
+    - returnResult:
+        return:
+          jobId: ${jobId}
+    - failExecution:
+        raise:
+          message: ${"The underlying batch job " + jobId + " failed"}
+# [END workflows_batch_container]
