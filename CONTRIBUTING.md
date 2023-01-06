@@ -1,4 +1,4 @@
-This document is about how to contribute to the `REPO_NAME` repository (created and owned by Community Tech Alliance).
+This document is about how to contribute to the `workflows-cta` repository (created and owned by Community Tech Alliance).
 
 No matter who you are, if you spot an error, omission, or bug, you're welcome to open an issue in this repo!
 
@@ -35,7 +35,7 @@ We encourage you to read this project's CONTRIBUTING policy (you are here), its 
 
 ### Submitting Pull Requests
 
-In order to submit a pull request with your suggested changes, please first [fork](https://github.com/community-tech-alliance/dbt-cta/) this repository and make your desired changes on that fork. Once you are ready to submit them for review, please [create a pull request from your fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork). A member of the CTA organization will apply any relevant labels and follow up with you about your pull request.
+In order to submit a pull request with your suggested changes, please first [fork](https://github.com/community-tech-alliance/workflows-cta/) this repository and make your desired changes on that fork. Once you are ready to submit them for review, please [create a pull request from your fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork). A member of the CTA organization will apply any relevant labels and follow up with you about your pull request.
 
 ## Public domain
 
